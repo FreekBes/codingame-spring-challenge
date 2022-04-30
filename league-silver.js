@@ -210,7 +210,7 @@ class Hero extends Entity {
 
 class Defender extends Hero {
     constructor(defendBase, attackBase, inputs, heroNum) {
-        super(defendBase, attackBase, inputs, heroNum, 4000, 1000, 1000);
+        super(defendBase, attackBase, inputs, heroNum, 5000, 1000, 1000);
     }
 
     findTarget(heroes, targets) {
@@ -252,17 +252,6 @@ class Defender extends Hero {
         if (!focusedEntity && this.focusEntityId > -1)
             this.clearFocusOnEntity();
 
-        // if many targets nearby and in the basecamp, shoot them all back to the middle
-        if (gameloop > 50 && mana > 10 && this.isInBaseCamp(this.defendBase)) {
-            let amountNearby = 0;
-            for (const target of targets) {
-                if (target.shieldLife == 0 && this.getDistanceTo(target) < 1280)
-                    amountNearby++;
-            }
-            if (amountNearby >= 3)
-                return (Hero.wind(this.attackBase, 'NICE'));
-        }
-
         // if focused monster is no longer in the basecamp, let go of focus
         if (focusedEntity && !focusedEntity.isInBaseCamp(this.defendBase)) {
             this.clearFocusOnEntity();
@@ -285,6 +274,17 @@ class Defender extends Hero {
                 if (targetDist < focusedDist && !Hero.isAlreadyFocusedByOtherHero(heroes, target.id))
                     return (this.defend(mana, target));
             }
+        }
+
+        // if many targets nearby and in the basecamp, shoot them all back to the middle
+        if (gameloop > 50 && mana > 10 && this.isInBaseCamp(this.defendBase)) {
+            let amountNearby = 0;
+            for (const target of targets) {
+                if (target.shieldLife == 0 && this.getDistanceTo(target) < 1280)
+                    amountNearby++;
+            }
+            if (amountNearby >= 3)
+                return (Hero.wind(this.attackBase, 'NICE'));
         }
 
         // if no longer in the basecamp, let go of focus and return to base
@@ -562,7 +562,7 @@ while (true) {
         let inputs = readline().split(' ');
         if (inputs[1] == 1) {
             if (heroes[heroNum]) {
-                if (heroNum == 1 && gameloop == 120)
+                if (heroNum == 1 && gameloop == 120 && bases[0].health < 3)
                     heroes[heroNum] = new Defender(bases[0], bases[1], inputs, heroNum);
                 else
                     heroes[heroNum].update(inputs);
