@@ -115,8 +115,8 @@ class Entity extends Position {
     }
 
     isCriticallyInBaseCamp(base) {
-        const dist = getDistance(base.g.x, base.y, this.g.x, this.g.y);
-        return (dist <= 2000);
+        const dist = getDistance(base.g.x, base.g.y, this.g.x, this.g.y);
+        return (dist <= 3500);
     }
 }
 
@@ -205,7 +205,7 @@ class Hero extends Entity {
 
 class Defender extends Hero {
     constructor(defendBase, attackBase, inputs, heroNum) {
-        super(defendBase, attackBase, inputs, heroNum, 2500, 1000, 1000);
+        super(defendBase, attackBase, inputs, heroNum, 4000, 1000, 1000);
     }
 
     findTarget(targets) {
@@ -214,9 +214,11 @@ class Defender extends Hero {
         dists.fill(Infinity);
         for (let i = 0; i < targetsNum; i++) {
             if (targets[i] instanceof Monster && targets[i].threatFor == 1)
-                dists[i] = this.getDistanceTo(targets[i]);
+                dists[i] = targets[i].getSmallestPossibleInterceptionDistance(this);
         }
         const smallestDist = Math.min.apply(null, dists);
+        if (smallestDist == Infinity)
+            return (null);
         const target = targets[dists.indexOf(smallestDist)];
         return (target);
     }
@@ -247,6 +249,26 @@ class Defender extends Hero {
         if (!focusedEntity && this.focusEntityId > -1)
             this.clearFocusOnEntity();
 
+        // if an enemy is near, protect
+        if (mana > 10) {
+            for (const target of targets) {
+                if (this.getDistanceTo(target) < 3000 && target instanceof Opponent) {
+                    if (this.shieldLife == 0) {
+                        Hero.shield(this.id);
+                        return (4);
+                    }
+                    else if (target.shieldLife == 0 && this.getDistanceTo(target) < 2200) {
+                        Hero.control(target.id, this.attackBase);
+                        return (3);
+                    }
+                    else if (target.shieldLife == 0 && this.getDistanceTo(target) < 1280) {
+                        Hero.wind(this.attackBase);
+                        return (3);
+                    }
+                }
+            }
+        }
+
         // if many targets nearby and in the basecamp, shoot them all back to the middle
         if (mana > 10 && this.isInBaseCamp(this.defendBase)) {
             let amountNearby = 0;
@@ -266,10 +288,25 @@ class Defender extends Hero {
             focusedEntity = null;
         }
 
-        // if current target is not in the critical part basecamp but there is one actually there, target it now!
-        if (focusedEntity && !focusedEntity.isCriticallyInBaseCamp(this.defendBase)) {
+        // if current target is not in the critical part basecamp but there is one actually closer, target it now!
+        if (focusedEntity) {
+            const focusedDist = focusedEntity.getDistanceTo(this.defendBase);
+            const distanceToBase = this.getDistanceTo(this.defendBase);
             for (const target of targets) {
-                if (target.isCriticallyInBaseCamp(this.defendBase) && !Hero.isAlreadyFocusedByOtherHero(heroes, target.id))
+                const targetDist = target.getDistanceTo(this.defendBase);
+                const heroDist = this.getDistanceTo(target);
+                if (mana > 10 && targetDist < focusedDist && heroDist < 1250) {
+                    Hero.wind(this.attackBase, 'PANIC');
+                    return (2);
+                }
+                if (mana > 10 && target.shieldLife == 0 && targetDist < focusedDist && heroDist < 2200 && heroDist > 800) {
+                    if (distanceToBase > targetDist)
+                        Hero.control(target.id, this, 'PANIC');
+                    else
+                        Hero.control(target.id, this.attackBase, 'PANIC');
+                    return (2);
+                }
+                if (targetDist < focusedDist && !Hero.isAlreadyFocusedByOtherHero(heroes, target.id))
                     return (this.defend(mana, target));
             }
         }
@@ -278,25 +315,9 @@ class Defender extends Hero {
         if (focusedEntity)
             return (this.defend(mana, focusedEntity));
 
-        // if an enemy is near, protect
-        if (mana > 10) {
-            for (const target of targets) {
-                if (this.getDistanceTo(target) < 3000 && target instanceof Opponent) {
-                    if (this.shieldLife == 0) {
-                        Hero.shield(this.id);
-                        return (4);
-                    }
-                    else if (target.shieldLife == 0 && this.getDistanceTo(target) < 2200) {
-                        Hero.control(target.id, this.attackBase);
-                        return (3);
-                    }
-                }
-            }
-        }
-
         // find a target
         const closestTarget = this.findTarget(targets);
-        if (closestTarget && closestTarget.isInBaseCamp(this.defendBase) && !Hero.isAlreadyFocusedByOtherHero(heroes, closestTarget.id))
+        if (closestTarget && !Hero.isAlreadyFocusedByOtherHero(heroes, closestTarget.id))
             return (this.defend(mana, closestTarget));
 
         this.patrol();
@@ -313,7 +334,9 @@ class Attacker extends Hero {
         return (
             target instanceof Opponent ||
             target.shieldLife > 0 ||
-            target.isInBaseCamp(this.defendBase)
+            target.isInBaseCamp(this.defendBase) ||
+            this.getDistanceTo(target) > 3200 ||
+            target.getDistanceTo(this.origFocus) > 8000
         );
     }
 
