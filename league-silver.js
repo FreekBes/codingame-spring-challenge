@@ -269,12 +269,6 @@ class Defender extends Hero {
             focusedEntity = null;
         }
 
-        // if no longer in the basecamp, let go of focus and return to base
-        if (distanceToBase > this.patrolRange) {
-            this.clearFocusOnEntity();
-            return (this.patrol());
-        }
-
         // if current target is not in the critical part basecamp but there is one actually closer, target it now!
         if (focusedEntity) {
             const focusedDist = focusedEntity.getDistanceTo(this.defendBase);
@@ -291,6 +285,12 @@ class Defender extends Hero {
                 if (targetDist < focusedDist && !Hero.isAlreadyFocusedByOtherHero(heroes, target.id))
                     return (this.defend(mana, target));
             }
+        }
+
+        // if no longer in the basecamp, let go of focus and return to base
+        if (distanceToBase > this.patrolRange) {
+            this.clearFocusOnEntity();
+            return (this.patrol());
         }
 
         // if an enemy is near, protect
