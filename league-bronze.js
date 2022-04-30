@@ -62,43 +62,50 @@ class Entity extends Position {
 }
 
 class Hero extends Entity {
-    constructor(base, inputs, heroNum) {
+    constructor(defendBase, attackBase, inputs, heroNum, patrolRange, poiX, poiY) {
         super(inputs);
 
         this.focusMonsterId = -1;
         this.heroNum = heroNum;
-        this.defendBase = base;
-        switch (heroNum) {
-            default: this.origFocus = getPositionBasedOnBase(base, 1000, 1000); break;
-            case 1: this.origFocus = getPositionBasedOnBase(base, 4000, 2000); break;
-            case 2: this.origFocus = getPositionBasedOnBase(base, 2000, 4000); break;
-        }
+        this.defendBase = defendBase;
+        this.attackBase = attackBase;
+        this.patrolRange = patrolRange;
+        this.origFocus = getPositionBasedOnBase(defendBase, poiX, poiY);
         this.focusCoords = this.origFocus.clone();
     }
 
-    moveTo(x, y) {
-        console.log('MOVE ' + x + ' ' + y);
+    moveTo(x, y, text) {
+        console.log('MOVE ' + x + ' ' + y + (text ? ' ' + text : ''));
     }
     
-    wait() {
+    wait(text) {
         console.log('WAIT');
     }
     
-    wind(x, y) {
-        console.log('SPELL WIND ' + x + ' ' + y);
+    wind(x, y, text) {
+        console.log('SPELL WIND ' + x + ' ' + y + (text ? ' ' + text : ''));
     }
 
-    shield(entityId) {
-        console.log('SPELL SHIELD ' + entityId);
+    shield(entityId, text) {
+        console.log('SPELL SHIELD ' + entityId + (text ? ' ' + text : ''));
     }
 
-    control(entityId, x, y) {
-        console.log('SPELL CONTROL ' + entityId + ' ' + x + ' ' + y);
+    control(entityId, x, y, text) {
+        console.log('SPELL CONTROL ' + entityId + ' ' + x + ' ' + y + (text ? ' ' + text : ''));
     }
 
     setFocusOnCoords(x, y) {
         this.focusCoords.x = x;
         this.focusCoords.y = y;
+    }
+
+    moveToFocusPoint(text) {
+        this.moveTo(this.focusCoords.x, this.focusCoords.y, text);
+    }
+
+    patrol() {
+        this.setFocusOnCoords(this.origFocus.x + getRandomValue(-this.patrolRange, this.patrolRange), this.origFocus.y + getRandomValue(-this.patrolRange, this.patrolRange));
+        this.moveToFocusPoint();
     }
 
     setFocusOnMonster(monster) {
@@ -131,92 +138,185 @@ class Hero extends Entity {
         return (this.focusCoords.x != this.origFocus.x || this.focusCoords.y != this.origFocus.y);
     }
 
-    findClosestTarget(targets) {
+    findClosestFoe(targets, exclude) {
+        if (!exclude)
+            exclude = new Array();
         const targetsNum = targets.length;
         const dists = new Array(targetsNum);
         for (let i = 0; i < targetsNum; i++) {
-            dists[i] = this.getDistanceTo(targets[i]);
+            if (targets[i].threatFor != 1 && targets[i].id in exclude)
+                dists[i] = Infinity;
+            else
+                dists[i] = this.getDistanceTo(targets[i]);
         }
         const smallestDist = Math.min.apply(null, dists);
         return [targets[dists.indexOf(smallestDist)], smallestDist];
     }
 
-    findFocusPoint(heroes, targets) {
-        const distanceFromDefence = this.getDistanceTo(this.origFocus);
-        const focusedMonster = getEntityById(targets, this.focusMonsterId);
+    findClosestTarget(targets, exclude) {
+        if (!exclude)
+            exclude = new Array();
+        const targetsNum = targets.length;
+        const dists = new Array(targetsNum);
+        for (let i = 0; i < targetsNum; i++) {
+            if (targets[i].id in exclude)
+                dists[i] = Infinity;
+            else
+                dists[i] = this.getDistanceTo(targets[i]);
+        }
+        const smallestDist = Math.min.apply(null, dists);
+        return [targets[dists.indexOf(smallestDist)], smallestDist];
+    }
+}
 
-        // if many targets nearby and in the basecamp, shoot them all back
-        if (this.isInBaseCamp(this.defendBase)) {
+class Defender extends Hero {
+    constructor(defendBase, attackBase, inputs, heroNum) {
+        super(defendBase, attackBase, inputs, heroNum, 2500, 1000, 1000);
+    }
+
+    defend(mana, target) {
+        const distanceToBase = this.getDistanceTo(this.defendBase);
+        const distanceToTarget = this.getDistanceTo(target);
+        const targetDistanceToBase = target.getDistanceTo(this.defendBase);
+
+        if (mana > 10) {
+            if (distanceToBase > targetDistanceToBase && distanceToTarget < 2200 && (distanceToTarget > 800 || targetDistanceToBase < 500)) {
+                // target is closer to base than hero is but not in attackable range, move it back to hero
+                this.control(target.id, this.x, this.y);
+                return (3);
+            }
+            else if (target.isCriticallyInBaseCamp(this.defendBase) && distanceToTarget < 1280) {
+                this.wind(9000, 4500);
+                return (2);
+            }
+        }
+        this.moveToFocusPoint();
+        return (1);
+    }
+
+    act(mana, heroes, targets) {
+        let focusedMonster = getEntityById(targets, this.focusMonsterId);
+        if (!focusedMonster && this.focusMonsterId > -1)
+            this.clearFocusOnMonster();
+
+        // if many targets nearby and in the basecamp, shoot them all back to the middle
+        if (mana > 10 && this.isInBaseCamp(this.defendBase)) {
             let amountNearby = 0;
             for (const target of targets) {
                 if (this.getDistanceTo(target) < 1280)
                     amountNearby++;
             }
-            if (amountNearby >= 3)
+            if (amountNearby >= 3) {
+                this.wind(9000, 4500, 'NICE');
                 return (2);
+            }
+        }
+
+        // if focused monster is no longer in the basecamp, let go of focus
+        if (focusedMonster && !focusedMonster.isInBaseCamp(this.defendBase)) {
+            this.clearFocusOnMonster();
+            focusedMonster = null;
         }
 
         // if current target is not in the critical part basecamp but there is one actually there, target it now!
-        if (focusedMonster && (!focusedMonster.isCriticallyInBaseCamp(this.defendBase) || Hero.isAlreadyFocusedByOtherHero(heroes, this.focusMonsterId))) {
+        if (focusedMonster && !focusedMonster.isCriticallyInBaseCamp(this.defendBase)) {
             for (const target of targets) {
-                if (target.isCriticallyInBaseCamp(this.defendBase)) {
+                if (target.isCriticallyInBaseCamp(this.defendBase) && !Hero.isAlreadyFocusedByOtherHero(heroes, target.id)) {
                     this.setFocusOnMonster(target);
-                    if (this.getDistanceTo(target) < 2200)
-                        return (3);
-                    return (1);
+                    return (this.defend(mana, target));
                 }
             }
         }
 
-        // if current target is not in the basecamp but there is one actually there, target it now!
-        if (focusedMonster && !focusedMonster.isInBaseCamp(this.defendBase)) {
-            for (const target of targets) {
-                if (target.isInBaseCamp(this.defendBase) && !Hero.isAlreadyFocusedByOtherHero(heroes, target.id)) {
-                    this.setFocusOnMonster(target);
-                    return (1);
-                }
-            }
-        }
-        
         // go after existing target
-        if (focusedMonster && (distanceFromDefence < 2000 || focusedMonster.isInBaseCamp(this.defendBase))) {
+        if (focusedMonster) {
             this.setFocusOnMonster(focusedMonster);
-            const focusedMonDist = this.getDistanceTo(focusedMonster);
-            if (focusedMonster.isCriticallyInBaseCamp(this.defendBase) && focusedMonDist < 1280)
-                return (2);
-            if (focusedMonster.isCriticallyInBaseCamp(this.defendBase) && focusedMonDist < 2200)
-                return (3);
-            return (1);
+            return (this.defend(mana, focusedMonster));
         }
-        else
-            this.clearFocusOnMonster();
 
-        if (targets.length > 0 && distanceFromDefence < 2000) {
+        // find a target
+        const closestTarget = this.findClosestFoe(targets);
+        if (closestTarget[0] && closestTarget[0].isInBaseCamp(this.defendBase) && !Hero.isAlreadyFocusedByOtherHero(heroes, closestTarget[0].id)) {
+            this.setFocusOnMonster(closestTarget[0]);
+            return (this.defend(mana, closestTarget[0]));
+        }
+
+        this.patrol();
+        return (0);
+    }
+}
+
+class Farmer extends Hero {
+    constructor(defendBase, attackBase, inputs, heroNum) {
+        super(defendBase, attackBase, inputs, heroNum, 6000, 4500, 3000);
+    }
+
+    attack(mana, target) {
+        this.moveToFocusPoint();
+        return (1);
+    }
+
+    act(mana, heroes, targets) {
+        const distanceFromPOI = this.getDistanceTo(this.origFocus);
+
+        if (targets.length > 0 && distanceFromPOI < this.patrolRange) {
             // find a close by target
             const closestTarget = this.findClosestTarget(targets);
-            if (closestTarget[1] < 2000) {
+            if (closestTarget && closestTarget[1] < 4000) {
                 this.setFocusOnMonster(closestTarget[0]);
-                return (1);
-            }
-
-            // find a next target
-            if (targets.length > this.heroNum) {
-                this.setFocusOnMonster(targets[this.heroNum]);
-                return (1);
+                return (this.attack(mana, closestTarget[0]));
             }
         }
-        // go to default position
-        this.setFocusOnCoords(this.origFocus.x, this.origFocus.y);
+
+        this.patrol();
+        return (0);
+    }
+}
+
+class Attacker extends Hero {
+    constructor(defendBase, attackBase, inputs, heroNum) {
+        super(defendBase, attackBase, inputs, heroNum, 0, 6000, 8000);
+
+        this.diverged = new Array();
+    }
+
+    getTargetInDirOfEnemyBase(targets) {
+        for (const target of targets) {
+            if (this.getDistanceTo(target) > 2200)
+                continue;
+            const distToDefend = target.getDistanceTo(this.defendBase);
+            const distToAttack = target.getDistanceTo(this.attackBase);
+            if (distToAttack > distToDefend && target.threatFor != 2 && target.health > 10) {
+                return (target);
+            }
+        }
+        return (null);
+    }
+
+    attack(mana, target, distance) {
+        if (mana > 10 && distance < 2200) {
+            this.control(target.id, this.attackBase.x, this.attackBase.y);
+            this.diverged.push(target.id);
+            return (2);
+        }
+        this.patrol();
         return (0);
     }
 
-    moveToFocusPoint() {
-        this.moveTo(this.focusCoords.x, this.focusCoords.y);
-    }
+    act(mana, heroes, targets) {
+        const distanceFromPOI = this.getDistanceTo(this.origFocus);
+        const focusedMonster = getEntityById(targets, this.focusMonsterId);
 
-    patrol() {
-        this.setFocusOnCoords(this.origFocus.x + getRandomValue(-2000, 2000), this.origFocus.y + getRandomValue(-2000, 2000));
-        this.moveToFocusPoint();
+        if (true || (targets.length > 0 && distanceFromPOI < this.patrolRange)) {
+            const target = this.getTargetInDirOfEnemyBase(targets);
+            if (target) {
+                this.setFocusOnMonster(target);
+                return (this.attack(mana, target, this.getDistanceTo(target)));
+            }
+        }
+        
+        this.patrol();
+        return (0);
     }
 }
 
@@ -260,48 +360,6 @@ class Base extends Position {
     }
 }
 
-class MagicAction {
-    constructor(heroNum, type, x, y) {
-        this.heroNum = heroNum;
-        this.type = type;
-        this.position = new Position(x, y);
-    }
-}
-
-class WindMagicAction extends MagicAction {
-    constructor(heroNum, x, y) {
-        super(heroNum, 'WIND', x, y);
-    }
-
-    static wasAlreadyCalledHere(magicActions, x, y) {
-        const tempPos = new Position(x, y);
-        for (const action of magicActions) {
-            if (!action)
-                continue;
-            if (tempPos.getDistanceTo(action.position) < 400)
-                return (true);
-        }
-        return (false);
-    }
-}
-
-class ControlMagicAction extends MagicAction {
-    constructor(heroNum, x, y, targetEntityId) {
-        super(heroNum, 'CONTROL', x, y);
-        this.targetEntityId = targetEntityId;
-    }
-
-    static wasAlreadyCalledOnEntity(magicActions, entityId) {
-        for (const action of magicActions) {
-            if (!action)
-                continue;
-            if (action.type == 'CONTROL' && action.targetEntityId == entityId)
-                return (true);
-        }
-        return (false);
-    }
-}
-
 function getEntityById(entities, id) {
     for (const entity of entities) {
         if (entity.id == id) {
@@ -336,8 +394,13 @@ while (true) {
         if (inputs[1] == 1) {
             if (heroes[heroNum])
                 heroes[heroNum].update(inputs);
-            else
-                heroes[heroNum] = new Hero(bases[0], inputs, heroNum);
+            else {
+                switch (heroNum) {
+                    default: case 0: case 1: heroes[heroNum] = new Defender(bases[0], bases[1], inputs, heroNum); break;
+                    // case 1: heroes[heroNum] = new Farmer(bases[0], bases[1], inputs, heroNum); break;
+                    case 2: heroes[heroNum] = new Attacker(bases[0], bases[1], inputs, heroNum); break;
+                }
+            }
             entities[i] = heroes[heroNum];
             heroNum++;
         }
@@ -355,38 +418,9 @@ while (true) {
             targets.push(entity);
     }
 
-    const magicActions = new Array(heroesPerPlayer);
     for (const hero of heroes) {
-        const action = hero.findFocusPoint(heroes, targets);
-        switch (action) {
-            default:
-            case 0:
-            case 1:
-                if (hero.hasNonDefaultFocusPoint)    
-                    hero.moveToFocusPoint();
-                else
-                    hero.patrol();
-                break;
-            case 2:
-                if (bases[0].mana > 10 && !WindMagicAction.wasAlreadyCalledHere(magicActions, hero.x, hero.y))
-                {
-                    hero.wind(bases[1].x, bases[1].y);
-                    bases[0].mana -= 10;
-                    magicActions.push(new WindMagicAction(hero.heroNum, hero.x, hero.y));
-                }
-                else
-                    hero.moveToFocusPoint();
-                break;
-            case 3:
-                if (bases[0].mana > 10 && !ControlMagicAction.wasAlreadyCalledOnEntity(magicActions, hero.focusMonsterId))
-                {
-                    hero.control(hero.focusMonsterId, bases[1].x, bases[1].y);
-                    bases[0].mana -= 10;
-                    magicActions.push(new ControlMagicAction(hero.heroNum, hero.x, hero.y, hero.focusMonsterId));
-                }
-                else
-                    hero.moveToFocusPoint();
-                break;
-        }
+        const action = hero.act(bases[0].mana, heroes, targets);
+        if (action == 2 || action == 3)
+            bases[0].mana -= 10; // deplete mana when used action was a spell
     }
 }
