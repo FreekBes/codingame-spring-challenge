@@ -137,7 +137,7 @@ class Entity extends Position {
 
     isCriticallyInBaseCamp(base) {
         const dist = getDistance(base.g.x, base.g.y, this.g.x, this.g.y);
-        return (dist <= 2000);
+        return (dist <= 4000);
     }
 }
 
@@ -240,7 +240,7 @@ class Defender extends Hero {
         const dists = new Array(targetsNum);
         dists.fill(Infinity);
         for (let i = 0; i < targetsNum; i++) {
-            if (targets[i] instanceof Monster && targets[i].threatFor == 1 && targets[i].isNearBaseCamp(this.defendBase) && !Hero.isAlreadyFocusedByOtherHero(heroes, targets[i]))
+            if (targets[i] instanceof Monster && targets[i].threatFor == 1 && targets[i].isNearBaseCamp(this.defendBase) && !Hero.isAlreadyFocusedByOtherHero(heroes, targets[i].id))
                 dists[i] = targets[i].getSmallestPossibleInterceptionDistance(this);
         }
         const smallestDist = Math.min.apply(null, dists);
@@ -261,7 +261,7 @@ class Defender extends Hero {
                 // target is closer to base than hero is but not in attackable range, move it back to hero
                 return (Hero.control(target.id, this));
             }
-            else if (target.health > 10 && target.isCriticallyInBaseCamp(this.defendBase) && distanceToTarget < 1280) {
+            else if (target.health > 8 && target.isCriticallyInBaseCamp(this.defendBase) && distanceToTarget < 1280) {
                 return (Hero.wind(this.attackBase, 'PANIC'));
             }
         }
@@ -296,7 +296,7 @@ class Defender extends Hero {
             //         return (Hero.control(target.id, this, 'PANIC'));
             //     return (Hero.control(target.id, this.attackBase, 'PANIC'));
             // }
-            if (targetDist < focusedDist && !Hero.isAlreadyFocusedByOtherHero(heroes, target.id))
+            if (targetDist < focusedDist)
                 return (this.defend(mana, target));
         }
 
@@ -318,11 +318,11 @@ class Defender extends Hero {
         }
 
         // if an enemy is near, protect
-        if (gameloop > 32 && mana > 20) {
+        if (mana > 10) {
             for (const target of targets) {
                 const enemyDistance = this.getDistanceTo(target);
                 if (enemyDistance < 5000 && target instanceof Opponent) {
-                    if (enemyDistance < 3000 && this.shieldLife == 0)
+                    if (this.shieldLife == 0)
                         return (Hero.shield(this.id));
                     if (target.shieldLife == 0 && enemyDistance < 2200)
                         return (Hero.control(target.id, this.attackBase));
@@ -349,15 +349,16 @@ class Defender extends Hero {
 
 class Attacker extends Hero {
     constructor(defendBase, attackBase, inputs, heroNum) {
-        super(defendBase, attackBase, inputs, heroNum, 5500, (heroNum == 1 ? 11000 : 8000), (heroNum == 1 ? 2000 : 6000));
+        super(defendBase, attackBase, inputs, heroNum, 5500, (heroNum == 2 ? 13000 : 8000), (heroNum == 2 ? 2500 : 6000));
     }
 
     nonSuitableTarget(heroes, target) {
         return (
             target instanceof Opponent ||
             target.shieldLife > 0 ||
-            Hero.isAlreadyFocusedByOtherHero(heroes, target) ||
+            Hero.isAlreadyFocusedByOtherHero(heroes, target.id) ||
             target.isNearBaseCamp(this.defendBase) ||
+            target.isInBaseCamp(this.attackBase) ||
             // this.getDistanceTo(target) > 3200 ||
             target.getDistanceTo(this.origFocus) > this.patrolRange
         );
@@ -369,7 +370,7 @@ class Attacker extends Hero {
             target.threatFor == 2 &&
             target.shieldLife == 0 &&
             this.getDistanceTo(target) < 2200 &&
-            target.getDistanceTo(this.attackBase) < 9000
+            target.getDistanceTo(this.attackBase) < 7000
         );
     }
 
@@ -425,6 +426,7 @@ class Attacker extends Hero {
         return (this.moveToFocusPoint());
     }
 
+    // attacker act
     act(mana, heroes, targets) {
         const distToAttackBase = this.getDistanceTo(this.attackBase);
 
@@ -440,7 +442,7 @@ class Attacker extends Hero {
         }
 
         // if near an opponent hero, protect or attack
-        if (gameloop > 90 && mana > 70 && distToAttackBase < 7000) {
+        if (gameloop > 90 && mana > 50) {
             for (const target of targets) {
                 if (target instanceof Opponent) {
                     const targetDist = this.getDistanceTo(target);
@@ -542,7 +544,6 @@ class Monster extends Entity {
         dists.fill(Infinity);
         for (let i = 2; i <= Monster.stepsInEachDir; i++) {
             const timeTillThere = 400 * i;
-            // const timeTillThere = 0;
             dists[i] = timeTillThere + from.getDistanceTo(this.trajectory[Monster.stepsInEachDir + i]);
         }
         return (dists);
@@ -600,6 +601,17 @@ class Base extends Position {
             return (new Base(17630, 9000));
         return (new Base(0, 0));
     }
+
+    opponentNear(entities) {
+        for (const entity of entities) {
+            if (entity instanceof Opponent) {
+                if (entity.isNearBaseCamp(this)) {
+                    return (true);
+                }
+            }
+        }
+        return (false);
+    }
 }
 
 // game init
@@ -627,6 +639,20 @@ while (true) {
         let inputs = readline().split(' ');
         let entity = Entity.getById(entities, parseInt(inputs[0]));
         if (entity) {
+            if (entity instanceof Attacker || entity instanceof Defender) {
+                if (heroNum == 1) {
+                    if (gameloop == 50 && entity instanceof Attacker)
+                        heroes[heroNum] = new Defender(bases[0], bases[1], inputs, heroNum);
+                    if (gameloop == 80 && bases[0].health == 3 && entity instanceof Defender)
+                        heroes[heroNum] = new Attacker(bases[0], bases[1], inputs, heroNum);
+
+                    if (gameloop > 100 && (bases[0].health != 3 || bases[0].opponentNear(entities)) && entity instanceof Attacker)
+                        heroes[heroNum] = new Defender(bases[0], bases[1], inputs, heroNum);
+                    else if (gameloop > 100 && entity instanceof Defender)
+                        heroes[heroNum] = new Attacker(bases[0], bases[1], inputs, heroNum);
+                }
+                heroNum++;
+            }
             entity.update(inputs);
             continue;
         }
