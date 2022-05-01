@@ -1,7 +1,7 @@
 function getDistance(x1, y1, x2, y2) {
     const a = x2 - x1;
     const b = y2 - y1;
-    return (Math.sqrt(a * a + b * b));
+    return (Math.floor(Math.sqrt(a * a + b * b)));
 }
 
 function getRandomValue(min, max) {
@@ -29,6 +29,7 @@ class Coords {
 
 class LogicalCoords extends Coords {
     constructor(x, y) {
+        // x and y are logical coordinates
         super(x, y);
     }
 
@@ -44,6 +45,7 @@ class LogicalCoords extends Coords {
 
 class GamicalCoords extends Coords {
     constructor(x, y) {
+        // x and y are gamical coordinates
         super(x, y);
     }
 
@@ -58,14 +60,18 @@ class GamicalCoords extends Coords {
 }
 
 class Position {
-    update(x, y) {
+    updateCoords(x, y) {
         // x and y are gamical coordinates
         this.g = new GamicalCoords(x, y);
         this.l = this.g.toLogical();
     }
 
+    update(x, y) {
+        this.updateCoords(x, y);
+    }
+
     constructor(x, y) {
-        this.update(x, y);
+        this.updateCoords(x, y);
     }
 
     clonePosition() {
@@ -75,12 +81,25 @@ class Position {
     getDistanceTo(position) {
         return (getDistance(this.g.x, this.g.y, position.g.x, position.g.y));
     }
+
+    invert() {
+        this.l.x = -this.l.x;
+        this.l.y = -this.l.y;
+        this.g = this.l.toGamical();
+    }
+
+    createInverted() {
+        const inverted = new LogicalCoords(-this.l.x, -this.l.y);
+        const invertedGamical = inverted.toGamical();
+        return (new Position(invertedGamical.x, invertedGamical.y));
+    }
 }
 
 class Entity extends Position {
     update(inputs) {
         super.update(inputs[2], inputs[3]);
 
+        this.lastUpdate = gameloop;
         this.id = parseInt(inputs[0]); // Unique identifier
         // this.type = parseInt(inputs[1]); // 0=monster, 1=your hero, 2=opponent hero
         this.shieldLife = parseInt(inputs[4]); // Count down until shield spell fades
@@ -97,6 +116,8 @@ class Entity extends Position {
         if (id == -1)
             return (null);
         for (const entity of entities) {
+            if (!entity)
+                continue;
             if (entity.id == id) {
                 return (entity);
             }
@@ -116,7 +137,7 @@ class Entity extends Position {
 
     isCriticallyInBaseCamp(base) {
         const dist = getDistance(base.g.x, base.g.y, this.g.x, this.g.y);
-        return (dist <= 3500);
+        return (dist <= 2000);
     }
 }
 
@@ -163,6 +184,7 @@ class Hero extends Entity {
     }
 
     moveToFocusPoint(text) {
+        // return (Hero.moveTo(this.focusPoint, (text ? text : this.focusPoint.g.x + ',' + this.focusPoint.g.y)));
         return (Hero.moveTo(this.focusPoint, text));
     }
 
@@ -239,8 +261,8 @@ class Defender extends Hero {
                 // target is closer to base than hero is but not in attackable range, move it back to hero
                 return (Hero.control(target.id, this));
             }
-            else if (target.isCriticallyInBaseCamp(this.defendBase) && distanceToTarget < 1280) {
-                return (Hero.wind(this.attackBase));
+            else if (target.health > 10 && target.isCriticallyInBaseCamp(this.defendBase) && distanceToTarget < 1280) {
+                return (Hero.wind(this.attackBase, 'PANIC'));
             }
         }
         return (this.moveToFocusPoint());
@@ -259,21 +281,23 @@ class Defender extends Hero {
         }
 
         // if current target is not in the critical part basecamp but there is one actually closer, target it now!
-        if (focusedEntity) {
-            const focusedDist = focusedEntity.getDistanceTo(this.defendBase);
-            for (const target of targets) {
-                const targetDist = target.getDistanceTo(this.defendBase);
-                const heroDist = this.getDistanceTo(target);
-                if (mana > 10 && targetDist < focusedDist && heroDist < 1250)
-                    return (Hero.wind(this.attackBase, 'PANIC'));
-                if (mana > 10 && target.shieldLife == 0 && targetDist < focusedDist && heroDist < 2200 && heroDist > 800) {
-                    if (distanceToBase > targetDist)
-                        return (Hero.control(target.id, this, 'PANIC'));
-                    return (Hero.control(target.id, this.attackBase, 'PANIC'));
-                }
-                if (targetDist < focusedDist && !Hero.isAlreadyFocusedByOtherHero(heroes, target.id))
-                    return (this.defend(mana, target));
-            }
+        let focusedDist = Infinity;
+        if (focusedEntity)
+             focusedDist = focusedEntity.getDistanceTo(this.defendBase);
+        for (const target of targets) {
+            if (!target.isCriticallyInBaseCamp(this.defendBase))
+                continue;
+            const targetDist = target.getDistanceTo(this.defendBase);
+            //const heroDist = this.getDistanceTo(target);
+            //if (mana > 10 && targetDist < focusedDist && heroDist < 1250)
+            //    return (Hero.wind(this.attackBase, 'PANIC'));
+            // if (mana > 10 && target.shieldLife == 0 && targetDist < focusedDist && heroDist < 2200 && heroDist > 800) {
+            //     if (distanceToBase > targetDist)
+            //         return (Hero.control(target.id, this, 'PANIC'));
+            //     return (Hero.control(target.id, this.attackBase, 'PANIC'));
+            // }
+            if (targetDist < focusedDist && !Hero.isAlreadyFocusedByOtherHero(heroes, target.id))
+                return (this.defend(mana, target));
         }
 
         // if many targets nearby and in the basecamp, shoot them all back to the middle
@@ -325,8 +349,7 @@ class Defender extends Hero {
 
 class Attacker extends Hero {
     constructor(defendBase, attackBase, inputs, heroNum) {
-        super(defendBase, attackBase, inputs, heroNum, 5500, getRandomValue(8000, 12000), getRandomValue(1000, 8000));
-        console.error(this.origFocus);
+        super(defendBase, attackBase, inputs, heroNum, 5500, (heroNum == 1 ? 11000 : 8000), (heroNum == 1 ? 2000 : 6000));
     }
 
     nonSuitableTarget(heroes, target) {
@@ -335,8 +358,8 @@ class Attacker extends Hero {
             target.shieldLife > 0 ||
             Hero.isAlreadyFocusedByOtherHero(heroes, target) ||
             target.isNearBaseCamp(this.defendBase) ||
-            this.getDistanceTo(target) > 3200 ||
-            target.getDistanceTo(this.origFocus) > 8000
+            // this.getDistanceTo(target) > 3200 ||
+            target.getDistanceTo(this.origFocus) > this.patrolRange
         );
     }
 
@@ -449,18 +472,31 @@ class Attacker extends Hero {
 }
 
 class Monster extends Entity {
-    static steps = 7;
+    static steps = 9;
     static stepsInEachDir = Math.floor(Monster.steps / 2);
 
-    constructor(inputs) {
-        super(inputs);
+    static createDoppelganger(basedOnEntity) {
+        const doppelId = (basedOnEntity.id % 2 == 1 ? basedOnEntity.id - 1 : basedOnEntity.id + 1);
+        const inputs = new Array(
+            doppelId, // id of doppelganger
+            0, // type (0 for monster)
+            basedOnEntity.g.x, // using based on entity coords as we invert later
+            basedOnEntity.g.y,
+            0, // shield life
+            0, // controlled (0 for no)
+            basedOnEntity.health, // using health of based on entity, assuming it is full health
+            -basedOnEntity.vx, // inverted vx
+            -basedOnEntity.vy, // inverted vy
+            basedOnEntity.nearBase,
+            (basedOnEntity.threatFor == 1 ? 2 : 0)
+        );
+        const doppelganger = new Monster(inputs);
+        doppelganger.invert();
+        doppelganger.estimateTrajectory();
+        return (doppelganger);
+    }
 
-        this.health = parseInt(inputs[6]); // Remaining health of this monster
-        this.vx = parseInt(inputs[7]); // Trajectory of this monster
-        this.vy = parseInt(inputs[8]);
-        this.nearBase = parseInt(inputs[9]); // 0=monster with no target yet, 1=monster targeting a base
-        this.threatFor = parseInt(inputs[10]); // Given this monster's trajectory, is it a threat to 1=your base, 2=your opponent's base, 0=neither
-
+    estimateTrajectory() {
         this.trajectory = new Array(Monster.steps);
         this.trajectory[Monster.stepsInEachDir] = this.clonePosition();
         for (let i = 0; i < Monster.stepsInEachDir; i++) {
@@ -473,12 +509,41 @@ class Monster extends Entity {
         }
     }
 
+    update(inputs) {
+        super.update(inputs);
+
+        this.health = parseInt(inputs[6]); // Remaining health of this monster
+        this.vx = parseInt(inputs[7]); // Trajectory of this monster
+        this.vy = parseInt(inputs[8]);
+        this.nearBase = parseInt(inputs[9]); // 0=monster with no target yet, 1=monster targeting a base
+        this.threatFor = parseInt(inputs[10]); // Given this monster's trajectory, is it a threat to 1=your base, 2=your opponent's base, 0=neither
+
+        this.estimateTrajectory();
+    }
+
+    estimateUpdate() {
+        this.lastUpdate = gameloop;
+
+        this.updateCoords(this.trajectory[Monster.stepsInEachDir + 1].g.x, this.trajectory[Monster.stepsInEachDir + 1].g.y);
+        if (this.g.x < 0 || this.g.y < 0 || this.g.x > 17630 || this.g.y > 9000)
+            return (false); // returns false if no longer in game map
+        this.estimateTrajectory();
+        return (true);
+    }
+
+    constructor(inputs) {
+        super(inputs);
+
+        this.update(inputs);
+    }
+
     getInterceptionDistances(from) {
-        const dists = new Array(Monster.steps);
+        const dists = new Array(Monster.stepsInEachDir + 1);
         dists.fill(Infinity);
-        for (let i = 0; i < Monster.steps; i++) {
-            const timeTillThere = (i <= Monster.stepsInEachDir ? 400 * (Monster.stepsInEachDir - i) : 400 * (i - Monster.stepsInEachDir));
-            dists[i] = timeTillThere + from.getDistanceTo(this.trajectory[i]);
+        for (let i = 2; i <= Monster.stepsInEachDir; i++) {
+            const timeTillThere = 400 * i;
+            // const timeTillThere = 0;
+            dists[i] = timeTillThere + from.getDistanceTo(this.trajectory[Monster.stepsInEachDir + i]);
         }
         return (dists);
     }
@@ -492,7 +557,7 @@ class Monster extends Entity {
     getBestInterceptPosition(from) {
         const dists = this.getInterceptionDistances(from);
         const smallestDist = Math.min.apply(null, dists);
-        const target = this.trajectory[dists.indexOf(smallestDist)];
+        const target = this.trajectory[Monster.stepsInEachDir + dists.indexOf(smallestDist)];
         return (target);
     }
 }
@@ -545,6 +610,7 @@ bases[1] = bases[0].invertClone();
 
 const heroesPerPlayer = parseInt(readline()); // Always 3
 const heroes = new Array(heroesPerPlayer);
+const entities = new Array();
 let gameloop = 0;
 
 // game loop
@@ -556,10 +622,14 @@ while (true) {
     }
 
     const entityCount = parseInt(readline()); // Amount of heros and monsters you can see
-    const entities = new Array(entityCount);
     let heroNum = 0;
     for (let i = 0; i < entityCount; i++) {
         let inputs = readline().split(' ');
+        let entity = Entity.getById(entities, parseInt(inputs[0]));
+        if (entity) {
+            entity.update(inputs);
+            continue;
+        }
         if (inputs[1] == 1) {
             if (heroes[heroNum]) {
                 if (heroNum == 1 && gameloop == 120 && bases[0].health < 3)
@@ -573,14 +643,35 @@ while (true) {
                     case 2: case 1: heroes[heroNum] = new Attacker(bases[0], bases[1], inputs, heroNum); break;
                 }
             }
-            entities[i] = heroes[heroNum];
+            entities.push(heroes[heroNum]);
             heroNum++;
         }
         else if (inputs[1] == 2) {
-            entities[i] = new Opponent(inputs);
+            entities.push(new Opponent(inputs));
         }
         else if (inputs[1] == 0) {
-            entities[i] = new Monster(inputs);
+            entities.push(new Monster(inputs));
+        }
+    }
+
+    // remove entities not updated in current loop
+    for (let i = 0; i < entities.length; i++) {
+        if (entities[i].lastUpdate != gameloop) {
+            entities.splice(i, 1);
+            i--; // indexes change after splice, so keep using current index
+        }
+    }
+
+    // add monsters that are likely there (spawns are mirrored, after all)
+    for (let i = 0; i < entities.length; i++) {
+        if (!(entities[i] instanceof Monster))
+            continue;
+        const invertedId = (entities[i].id % 2 == 1 ? entities[i].id - 1 : entities[i].id + 1);
+        let doppelganger = Entity.getById(entities, invertedId);
+        if (!doppelganger) {
+            doppelganger = Monster.createDoppelganger(entities[i]);
+            entities.splice(i, 0, doppelganger);
+            i++; // skip doppelganger in next loop of this for statement
         }
     }
 
