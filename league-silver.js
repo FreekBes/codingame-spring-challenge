@@ -328,8 +328,6 @@ class Defender extends Hero {
                         return (Hero.control(target.id, this.attackBase));
                     if (target.shieldLife == 0 && enemyDistance < 1280)
                         return (Hero.wind(this.attackBase));
-                    this.setFocusOnEntity(target);
-                    return (this.moveToFocusPoint());
                 }
             }
         }
